@@ -161,17 +161,15 @@
     <section>
       <h2>Options</h2>
       <label class="check"><input type="checkbox" id="paved"> Paved roads only</label>
-      <label for="emax" class="field-note" style="margin:0 0 4px;display:block">Elevation chart top (leave empty to auto-fit)</label>
+      <label for="emax" class="field-note" style="margin:0 0 4px;display:block">Elevation chart top, metres (leave empty to auto-fit)</label>
       <input type="number" id="emax" value="300" min="10" step="10">
-    </section>
-
-    <section>
-      <h2>Add a stop by coordinates</h2>
-      <div class="row">
-        <input type="text" id="coords" placeholder="1800 3660" aria-label="X and Y coordinates">
-        <button class="fixed" id="addcoords">Add stop</button>
-      </div>
-      <div class="field-note">Copy X and Y from gtamap.net, separated by a space or comma.</div>
+      <label for="units" class="field-note" style="margin:10px 0 4px;display:block">Units</label>
+      <select id="units">
+        <option value="metric" selected>Kilometres / metres</option>
+        <option value="imperial">Miles / feet</option>
+      </select>
+      <label for="theme" class="field-note" style="margin:10px 0 4px;display:block">Colour theme</label>
+      <select id="theme"></select>
     </section>
 
     <section>
@@ -199,10 +197,9 @@
       <div class="field-note">One game unit is about one metre.</div>
     </section>
 
-    <section id="loadedbox" class="hidden">
-      <h2>Data</h2>
-      <div class="field-note" id="datainfo"></div>
-    </section>
+    <footer style="color:var(--muted);font-size:12px;margin-top:12px;padding-top:12px;border-top:1px solid var(--line)">
+      Unofficial fan project. Not affiliated with or endorsed by Rockstar Games or Take-Two Interactive.
+    </footer>
   </aside>
 
   <div class="main">
@@ -289,8 +286,6 @@ function build(data) {
   }
   bounds = { x0, x1, y0, y1 };
   wps = []; route = null; prof = null; hover = -1;
-  $("datainfo").textContent = N.toLocaleString() + " road points, " + M.toLocaleString() + " links loaded.";
-  $("loadedbox").classList.remove("hidden");
   $("overlay").classList.add("hidden");
   fitView();
   refresh();
@@ -509,10 +504,10 @@ function renderStats() {
     if (prof.g[i] < down) down = prof.g[i];
   }
   $("s-dist").textContent = fmtDist(prof.total);
-  $("s-gain").textContent = Math.round(gain) + " m";
-  $("s-loss").textContent = Math.round(loss) + " m";
-  $("s-max").textContent = Math.round(zmax) + " m";
-  $("s-min").textContent = Math.round(zmin) + " m";
+  $("s-gain").textContent = fmtElev(gain);
+  $("s-loss").textContent = fmtElev(loss);
+  $("s-max").textContent = fmtElev(zmax);
+  $("s-min").textContent = fmtElev(zmin);
   $("s-up").textContent = "+" + (Math.max(0, up) * 100).toFixed(1) + "%";
   $("s-down").textContent = (Math.min(0, down) * 100).toFixed(1) + "%";
 }
@@ -606,13 +601,25 @@ function drawElev() {
   niceTicks(zmin, zmax, 4).forEach(v => {
     const y = Math.round(yOf(v)) + 0.5;
     ectx.strokeStyle = COLORS.line; ectx.beginPath(); ectx.moveTo(CH.L, y); ectx.lineTo(CH.L + pw, y); ectx.stroke();
-    ectx.fillStyle = COLORS.muted; ectx.fillText(Math.round(v) + " m", CH.L - 8, y);
+    ectx.fillStyle = COLORS.muted; ectx.fillText(fmtElev(v), CH.L - 8, y);
   });
   ectx.textAlign = "center"; ectx.textBaseline = "top";
-  const useKm = prof.total >= 3000;
-  niceTicks(0, useKm ? prof.total / 1000 : prof.total, 6).forEach(v => {
-    const d = useKm ? v * 1000 : v, x = Math.round(xOf(d)) + 0.5;
-    ectx.fillStyle = COLORS.muted; ectx.fillText(useKm ? v + " km" : v + " m", x, CH.T + ph + 6);
+  let dtVals, dtToDist, dtUnit;
+  if (imperial) {
+    const totalMi = prof.total * 0.000621371;
+    const useMi = totalMi >= 0.3;
+    dtVals = niceTicks(0, useMi ? totalMi : prof.total * 3.28084, 6);
+    dtToDist = v => useMi ? v / 0.000621371 : v / 3.28084;
+    dtUnit = useMi ? "mi" : "ft";
+  } else {
+    const useKm = prof.total >= 3000;
+    dtVals = niceTicks(0, useKm ? prof.total / 1000 : prof.total, 6);
+    dtToDist = v => useKm ? v * 1000 : v;
+    dtUnit = useKm ? "km" : "m";
+  }
+  dtVals.forEach(v => {
+    const x = Math.round(xOf(dtToDist(v))) + 0.5;
+    ectx.fillStyle = COLORS.muted; ectx.fillText(v + " " + dtUnit, x, CH.T + ph + 6);
   });
 
   ectx.save();
@@ -751,7 +758,7 @@ ech.addEventListener("mousemove", e => {
   const f = (e.clientX - r.left - CH.L) / (EW - CH.L - CH.R);
   hover = Math.max(0, Math.min(prof.m - 1, Math.round(f * (prof.m - 1))));
   const g = prof.g[hover] * 100;
-  $("hoverinfo").innerHTML = "<b>" + fmtDist(prof.d[hover]) + "</b> in, <b>" + Math.round(prof.z[hover]) + " m</b> high, grade <b>" + (g >= 0 ? "+" : "") + g.toFixed(1) + "%</b>";
+  $("hoverinfo").innerHTML = "<b>" + fmtDist(prof.d[hover]) + "</b> in, <b>" + fmtElev(prof.z[hover]) + "</b> high, grade <b>" + (g >= 0 ? "+" : "") + g.toFixed(1) + "%</b>";
   draw(); drawElev();
 });
 ech.addEventListener("mouseleave", () => { hover = -1; $("hoverinfo").textContent = ""; draw(); drawElev(); });
@@ -760,15 +767,41 @@ $("paved").addEventListener("change", refresh);
 $("emax").addEventListener("input", drawElev);
 $("undo").addEventListener("click", () => { wps.pop(); refresh(); });
 $("clear").addEventListener("click", () => { wps = []; refresh(); });
-function addCoords() {
-  const nums = ($("coords").value.match(/-?\d+(?:\.\d+)?/g) || []).map(Number);
-  if (nums.length < 2 || !N) return;
-  wps.push({ x: nums[0], y: nums[1], node: -1 });
-  $("coords").value = "";
-  refresh();
+
+/* units */
+let imperial = false;
+function fmtDist(d) {
+  if (imperial) {
+    const mi = d * 0.000621371;
+    return mi >= 0.1 ? mi.toFixed(2) + " mi" : Math.round(d * 3.28084) + " ft";
+  }
+  return d >= 1000 ? (d / 1000).toFixed(2) + " km" : Math.round(d) + " m";
 }
-$("addcoords").addEventListener("click", addCoords);
-$("coords").addEventListener("keydown", e => { if (e.key === "Enter") addCoords(); });
+function fmtElev(z) { return imperial ? Math.round(z * 3.28084) + " ft" : Math.round(z) + " m"; }
+$("units").addEventListener("change", () => {
+  imperial = $("units").value === "imperial";
+  renderStats(); drawElev();
+});
+
+/* themes */
+const THEMES = [
+  { name: "Midnight Teal", colors: { sea:"#0c2733", panel:"#10222d", panel2:"#163140", line:"#24485a", text:"#e8f1f5", muted:"#8fa9b7", road:"#4f7387", gravel:"#9c8552", route:"#ffcf3f", start:"#3ddc97", end:"#ff5a6e", stop:"#f4f8fa" } },
+  { name: "Sunset", colors: { sea:"#2b1720", panel:"#341b26", panel2:"#432231", line:"#5c2f45", text:"#fbe9ee", muted:"#c98aa3", road:"#8a4f63", gravel:"#b98a4e", route:"#ff8a3d", start:"#3ddc97", end:"#ff4f6d", stop:"#fff3e6" } },
+  { name: "Daylight", colors: { sea:"#eef3f5", panel:"#ffffff", panel2:"#f0f4f6", line:"#d7e1e6", text:"#1c2b33", muted:"#5b7280", road:"#93a7b2", gravel:"#c9a055", route:"#1f7ae0", start:"#1fb97a", end:"#e0433f", stop:"#1c2b33" } },
+  { name: "Forest", colors: { sea:"#0e1f16", panel:"#13291c", panel2:"#1a3524", line:"#2c4a35", text:"#e7f5ec", muted:"#8fb79e", road:"#4f7360", gravel:"#9c8552", route:"#ffd166", start:"#57e389", end:"#ff6b6b", stop:"#eafbf1" } },
+];
+const themeSel = $("theme");
+THEMES.forEach((t, i) => { const o = document.createElement("option"); o.value = i; o.textContent = t.name; themeSel.appendChild(o); });
+function applyTheme(i) {
+  const c = THEMES[i].colors, root = document.documentElement.style;
+  root.setProperty("--sea", c.sea); root.setProperty("--panel", c.panel); root.setProperty("--panel-2", c.panel2);
+  root.setProperty("--line", c.line); root.setProperty("--text", c.text); root.setProperty("--muted", c.muted);
+  root.setProperty("--road", c.road); root.setProperty("--gravel", c.gravel); root.setProperty("--route", c.route);
+  root.setProperty("--start", c.start); root.setProperty("--end", c.end); root.setProperty("--stop", c.stop);
+  Object.assign(COLORS, c);
+  draw(); drawElev();
+}
+themeSel.addEventListener("change", () => applyTheme(parseInt(themeSel.value, 10)));
 window.addEventListener("keydown", e => {
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z" && document.activeElement.tagName !== "INPUT") { wps.pop(); refresh(); }
 });
