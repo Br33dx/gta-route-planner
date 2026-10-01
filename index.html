@@ -183,6 +183,16 @@
     </section>
 
     <section>
+      <h2>Saved routes (up to 10, on this device)</h2>
+      <div class="row">
+        <input type="text" id="savename" placeholder="Name this route" aria-label="Route name">
+        <button class="fixed" id="savebtn">Save</button>
+      </div>
+      <ul class="stops" id="savedlist" style="margin-top:8px"></ul>
+      <div class="empty" id="savedempty">No saved routes yet.</div>
+    </section>
+
+    <section>
       <h2>Route</h2>
       <dl class="stats">
         <dt>Distance</dt><dd id="s-dist">-</dd>
@@ -245,6 +255,15 @@ let prof = null;    // resampled profile
 let hover = -1;
 let bounds = null;
 
+/* Known gaps in the datamined road network (jumps/loading-trigger spots the
+   game handles specially, so no road node data exists across them). Each
+   entry is two real-world coordinate pairs, one on each side of the gap;
+   we snap each to its nearest road node and bridge them with one edge. */
+const MANUAL_BRIDGES = [
+  [[2242, 5383], [2251, 5381]],
+  [[2498, 5193], [2500, 5188]],
+];
+
 /* ---------- data loading ---------- */
 function build(data) {
   if (!data || !data.n || !data.e) throw new Error("This file doesn't look like nodes_slim.json.");
@@ -254,11 +273,23 @@ function build(data) {
     const n = data.n[i];
     X[i] = n[0]; Y[i] = n[1]; Z[i] = n[2]; G[i] = n[3];
   }
-  const M = data.e.length;
+
+  function nearestRaw(wx, wy) {
+    let bi = -1, bd = Infinity;
+    for (let i = 0; i < N; i++) {
+      const d = (X[i] - wx) ** 2 + (Y[i] - wy) ** 2;
+      if (d < bd) { bd = d; bi = i; }
+    }
+    return bi;
+  }
+  const bridgeEdges = MANUAL_BRIDGES.map(([[ax, ay], [bx, by]]) => [nearestRaw(ax, ay), nearestRaw(bx, by)]);
+  const allEdges = data.e.concat(bridgeEdges);
+
+  const M = allEdges.length;
   EA = new Int32Array(M); EB = new Int32Array(M);
   const deg = new Int32Array(N + 1);
   for (let i = 0; i < M; i++) {
-    const a = data.e[i][0], b = data.e[i][1];
+    const a = allEdges[i][0], b = allEdges[i][1];
     EA[i] = a; EB[i] = b; deg[a]++; deg[b]++;
   }
   adjStart = new Int32Array(N + 1);
@@ -802,6 +833,42 @@ function applyTheme(i) {
   draw(); drawElev();
 }
 themeSel.addEventListener("change", () => applyTheme(parseInt(themeSel.value, 10)));
+
+/* saved routes (localStorage -- this browser only) */
+const SAVE_KEY = "gtaRoutePlannerSavedRoutes";
+function getSaved() { try { return JSON.parse(localStorage.getItem(SAVE_KEY)) || []; } catch { return []; } }
+function setSaved(list) { localStorage.setItem(SAVE_KEY, JSON.stringify(list)); }
+function renderSaved() {
+  const list = getSaved();
+  const ul = $("savedlist"); ul.innerHTML = "";
+  $("savedempty").classList.toggle("hidden", list.length > 0);
+  list.forEach((r, i) => {
+    const li = document.createElement("li");
+    const name = document.createElement("span");
+    name.className = "xy"; name.textContent = r.name + " (" + r.wps.length + " stops)";
+    const loadBtn = document.createElement("button"); loadBtn.textContent = "Load";
+    loadBtn.addEventListener("click", () => {
+      wps = r.wps.map(([x, y]) => ({ x, y, node: -1 }));
+      $("paved").checked = !!r.paved;
+      refresh();
+    });
+    const delBtn = document.createElement("button"); delBtn.textContent = "\u00d7"; delBtn.title = "Delete";
+    delBtn.addEventListener("click", () => { const l = getSaved(); l.splice(i, 1); setSaved(l); renderSaved(); });
+    li.append(name, loadBtn, delBtn);
+    ul.appendChild(li);
+  });
+}
+$("savebtn").addEventListener("click", () => {
+  if (wps.length < 2) { alert("Add at least two stops before saving a route."); return; }
+  const list = getSaved();
+  if (list.length >= 10) { alert("You already have 10 saved routes. Delete one before saving another."); return; }
+  const name = $("savename").value.trim() || ("Route " + (list.length + 1));
+  list.push({ name, wps: wps.map(w => [w.x, w.y]), paved: $("paved").checked });
+  setSaved(list);
+  $("savename").value = "";
+  renderSaved();
+});
+renderSaved();
 window.addEventListener("keydown", e => {
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z" && document.activeElement.tagName !== "INPUT") { wps.pop(); refresh(); }
 });
